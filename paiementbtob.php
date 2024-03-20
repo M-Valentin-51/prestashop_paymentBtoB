@@ -1,28 +1,29 @@
 <?php
+
 /**
-* 2007-2024 PrestaShop
-*
-* NOTICE OF LICENSE
-*
-* This source file is subject to the Academic Free License (AFL 3.0)
-* that is bundled with this package in the file LICENSE.txt.
-* It is also available through the world-wide-web at this URL:
-* http://opensource.org/licenses/afl-3.0.php
-* If you did not receive a copy of the license and are unable to
-* obtain it through the world-wide-web, please send an email
-* to license@prestashop.com so we can send you a copy immediately.
-*
-* DISCLAIMER
-*
-* Do not edit or add to this file if you wish to upgrade PrestaShop to newer
-* versions in the future. If you wish to customize PrestaShop for your
-* needs please refer to http://www.prestashop.com for more information.
-*
-*  @author    PrestaShop SA <contact@prestashop.com>
-*  @copyright 2007-2024 PrestaShop SA
-*  @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
-*  International Registered Trademark & Property of PrestaShop SA
-*/
+ * 2007-2024 PrestaShop
+ *
+ * NOTICE OF LICENSE
+ *
+ * This source file is subject to the Academic Free License (AFL 3.0)
+ * that is bundled with this package in the file LICENSE.txt.
+ * It is also available through the world-wide-web at this URL:
+ * http://opensource.org/licenses/afl-3.0.php
+ * If you did not receive a copy of the license and are unable to
+ * obtain it through the world-wide-web, please send an email
+ * to license@prestashop.com so we can send you a copy immediately.
+ *
+ * DISCLAIMER
+ *
+ * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
+ * versions in the future. If you wish to customize PrestaShop for your
+ * needs please refer to http://www.prestashop.com for more information.
+ *
+ * @author    PrestaShop SA <contact@prestashop.com>
+ * @copyright 2007-2024 PrestaShop SA
+ * @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
+ *  International Registered Trademark & Property of PrestaShop SA
+ */
 
 if (!defined('_PS_VERSION_')) {
     exit;
@@ -39,7 +40,8 @@ class PaiementBtoB extends PaymentModule
         $this->version = '1.0.0';
         $this->author = 'Valentin Marlois';
         $this->need_instance = 1;
-
+        $this->controllers = ['confirmation', 'validation', 'redirect'];
+        $this->currencies = true;
         /**
          * Set $this->bootstrap to true if your module is compliant with bootstrap (PrestaShop 1.6)
          */
@@ -63,16 +65,14 @@ class PaiementBtoB extends PaymentModule
      */
     public function install()
     {
-        if (extension_loaded('curl') == false)
-        {
+        if (extension_loaded('curl') == false) {
             $this->_errors[] = $this->l('You have to enable the cURL extension on your server to install this module');
             return false;
         }
 
         $iso_code = Country::getIsoById(Configuration::get('PS_COUNTRY_DEFAULT'));
 
-        if (in_array($iso_code, $this->limited_countries) == false)
-        {
+        if (in_array($iso_code, $this->limited_countries) == false) {
             $this->_errors[] = $this->l('This module is not available in your country');
             return false;
         }
@@ -83,7 +83,7 @@ class PaiementBtoB extends PaymentModule
             $this->registerHook('header') &&
             $this->registerHook('displayBackOfficeHeader') &&
             $this->registerHook('payment') &&
-            $this->registerHook('paymentReturn') &&
+            $this->registerHook('displayPaymentReturn') &&
             $this->registerHook('paymentOptions');
     }
 
@@ -108,9 +108,33 @@ class PaiementBtoB extends PaymentModule
 
         $this->context->smarty->assign('module_dir', $this->_path);
 
-        $output = $this->context->smarty->fetch($this->local_path.'views/templates/admin/configure.tpl');
+        $output = $this->context->smarty->fetch($this->local_path . 'views/templates/admin/configure.tpl');
 
-        return $output.$this->renderForm();
+        return $output . $this->renderForm();
+    }
+
+    /**
+     * Save form data.
+     */
+    protected function postProcess()
+    {
+        $form_values = $this->getConfigFormValues();
+
+        foreach (array_keys($form_values) as $key) {
+            Configuration::updateValue($key, Tools::getValue($key));
+        }
+    }
+
+    /**
+     * Set values for the inputs.
+     */
+    protected function getConfigFormValues()
+    {
+        return array(
+            'PAIEMENTBTOB_LIVE_MODE' => Configuration::get('PAIEMENTBTOB_LIVE_MODE', true),
+            'PAIEMENTBTOB_ACCOUNT_EMAIL' => Configuration::get('PAIEMENTBTOB_ACCOUNT_EMAIL', 'contact@prestashop.com'),
+            'PAIEMENTBTOB_ACCOUNT_PASSWORD' => Configuration::get('PAIEMENTBTOB_ACCOUNT_PASSWORD', null),
+        );
     }
 
     /**
@@ -129,7 +153,7 @@ class PaiementBtoB extends PaymentModule
         $helper->identifier = $this->identifier;
         $helper->submit_action = 'submitPaiementBtoBModule';
         $helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false)
-            .'&configure='.$this->name.'&tab_module='.$this->tab.'&module_name='.$this->name;
+            . '&configure=' . $this->name . '&tab_module=' . $this->tab . '&module_name=' . $this->name;
         $helper->token = Tools::getAdminTokenLite('AdminModules');
 
         $helper->tpl_vars = array(
@@ -149,8 +173,8 @@ class PaiementBtoB extends PaymentModule
         return array(
             'form' => array(
                 'legend' => array(
-                'title' => $this->l('Settings'),
-                'icon' => 'icon-cogs',
+                    'title' => $this->l('Settings'),
+                    'icon' => 'icon-cogs',
                 ),
                 'input' => array(
                     array(
@@ -194,37 +218,13 @@ class PaiementBtoB extends PaymentModule
     }
 
     /**
-     * Set values for the inputs.
+     * Add the CSS & JavaScript files you want to be loaded in the BO.
      */
-    protected function getConfigFormValues()
-    {
-        return array(
-            'PAIEMENTBTOB_LIVE_MODE' => Configuration::get('PAIEMENTBTOB_LIVE_MODE', true),
-            'PAIEMENTBTOB_ACCOUNT_EMAIL' => Configuration::get('PAIEMENTBTOB_ACCOUNT_EMAIL', 'contact@prestashop.com'),
-            'PAIEMENTBTOB_ACCOUNT_PASSWORD' => Configuration::get('PAIEMENTBTOB_ACCOUNT_PASSWORD', null),
-        );
-    }
-
-    /**
-     * Save form data.
-     */
-    protected function postProcess()
-    {
-        $form_values = $this->getConfigFormValues();
-
-        foreach (array_keys($form_values) as $key) {
-            Configuration::updateValue($key, Tools::getValue($key));
-        }
-    }
-
-    /**
-    * Add the CSS & JavaScript files you want to be loaded in the BO.
-    */
     public function hookDisplayBackOfficeHeader()
     {
         if (Tools::getValue('configure') == $this->name) {
-            $this->context->controller->addJS($this->_path.'views/js/back.js');
-            $this->context->controller->addCSS($this->_path.'views/css/back.css');
+            $this->context->controller->addJS($this->_path . 'views/js/back.js');
+            $this->context->controller->addCSS($this->_path . 'views/css/back.css');
         }
     }
 
@@ -233,8 +233,8 @@ class PaiementBtoB extends PaymentModule
      */
     public function hookHeader()
     {
-        $this->context->controller->addJS($this->_path.'/views/js/front.js');
-        $this->context->controller->addCSS($this->_path.'/views/css/front.css');
+        $this->context->controller->addJS($this->_path . '/views/js/front.js');
+        $this->context->controller->addCSS($this->_path . '/views/css/front.css');
     }
 
     /**
@@ -257,12 +257,12 @@ class PaiementBtoB extends PaymentModule
     /**
      * This hook is used to display the order confirmation page.
      */
-    public function hookPaymentReturn($params)
+    /*  public function hookDisplayPaymentReturn($params)
     {
         if ($this->active == false)
             return;
 
-        $order = $params['objOrder'];
+        $order = $params['order'];
 
         if ($order->getCurrentOrderState()->id != Configuration::get('PS_OS_ERROR'))
             $this->smarty->assign('status', 'ok');
@@ -275,7 +275,7 @@ class PaiementBtoB extends PaymentModule
         ));
 
         return $this->display(__FILE__, 'views/templates/hook/confirmation.tpl');
-    }
+    } */
 
     /**
      * Return payment options available for PS 1.7+
